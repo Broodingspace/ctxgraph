@@ -36,7 +36,7 @@ Designed to be **library-first**, **local-first**, and **useful without any LLM*
 ```bash
 pip install ctxgraph
 # or from source:
-git clone https://github.com/yourusername/ctxgraph.git
+git clone https://github.com/Broodingspace/ctxgraph.git
 cd ctxgraph && pip install -e .
 ```
 
@@ -331,7 +331,7 @@ graph = load_graph("graph.json")
 ## Development
 
 ```bash
-git clone https://github.com/yourusername/ctxgraph
+git clone https://github.com/Broodingspace/ctxgraph
 cd ctxgraph
 pip install -e ".[dev]"
 
