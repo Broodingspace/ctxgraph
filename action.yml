@@ -38,6 +38,18 @@ inputs:
     description: "Maximum blast radius counted as medium severity."
     required: false
     default: "25"
+  run-tests:
+    description: "Whether to run the repository test suite as part of the action."
+    required: false
+    default: "false"
+  test-command:
+    description: "Command used to run tests when run-tests=true."
+    required: false
+    default: "pytest"
+  fail-on-test-failure:
+    description: "Whether the action should fail if the test command fails."
+    required: false
+    default: "true"
 runs:
   using: "composite"
   steps:
@@ -48,6 +60,42 @@ runs:
     - name: Install ctxgraph
       shell: bash
       run: pip install "${{ github.action_path }}"
+    - name: Install repository test dependencies
+      if: ${{ inputs.run-tests == 'true' }}
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        if ! pip install -e "${{ inputs.repo-path }}[dev]"; then
+          pip install -e "${{ inputs.repo-path }}"
+          pip install pytest
+        fi
+    - name: Run repository tests
+      if: ${{ inputs.run-tests == 'true' }}
+      id: run_tests
+      shell: bash
+      env:
+        TEST_COMMAND: ${{ inputs.test-command }}
+      run: |
+        echo "::group::ctxgraph: run tests"
+        set +e
+        bash -lc "$TEST_COMMAND"
+        status=$?
+        set -e
+        if [ $status -eq 0 ]; then
+          echo "Test status: passed"
+          echo "test_status=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "Test status: failed (exit $status)"
+          echo "test_status=failed" >> "$GITHUB_OUTPUT"
+          echo "test_exit_code=$status" >> "$GITHUB_OUTPUT"
+        fi
+        echo "## ctxgraph test run" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Command: \`${{ inputs.test-command }}\`" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Status: **$( [ $status -eq 0 ] && echo passed || echo failed )**" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "::endgroup::"
+        exit 0
     - name: Run ctxgraph impact analysis
       shell: bash
       env:
@@ -73,3 +121,9 @@ runs:
           cmd+=(--markdown-out "${INPUT_MARKDOWN_OUT}")
         fi
         "${cmd[@]}"
+    - name: Enforce test success
+      if: ${{ inputs.run-tests == 'true' && inputs.fail-on-test-failure == 'true' && steps.run_tests.outputs.test_status == 'failed' }}
+      shell: bash
+      run: |
+        echo "Repository tests failed during ctxgraph action."
+        exit 1
