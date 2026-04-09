@@ -59,6 +59,27 @@ class ImpactEntry:
     node: Node
     blast_radius: int
     high_risk_callers: tuple[Node, ...]
+    affected_nodes: tuple[Node, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SeverityThresholds:
+    """Thresholds for low/medium/high impact classification."""
+
+    low_max: int = 10
+    medium_max: int = 25
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageAssessment:
+    """Structural coverage signals for the current PR."""
+
+    impacted_nodes: int
+    touched_impacted_nodes: int
+    impacted_files: int
+    touched_impacted_files: int
+    changed_test_files: int
+    status: str
 
 
 def run_git(args: list[str], cwd: Path) -> str:
@@ -214,19 +235,92 @@ def build_impact_entries(
                 node=node,
                 blast_radius=blast.count,
                 high_risk_callers=callers,
+                affected_nodes=tuple(sorted(blast.affected_nodes, key=lambda item: item.id)),
             )
         )
 
     return sorted(entries, key=lambda item: (-item.blast_radius, item.node.id))
 
 
-def format_console_report(entries: list[ImpactEntry], changed_files: list[ChangedFile]) -> str:
+def classify_severity(blast_radius: int, thresholds: SeverityThresholds) -> str:
+    """Classify impact severity from a blast-radius count."""
+    if blast_radius <= thresholds.low_max:
+        return "low"
+    if blast_radius <= thresholds.medium_max:
+        return "medium"
+    return "high"
+
+
+def _is_test_path(path: Path) -> bool:
+    """Return whether a path looks like a Python test file."""
+    name = path.name
+    return name.startswith("test_") or name.endswith("_test.py") or name == "conftest.py"
+
+
+def assess_pr_coverage(entries: list[ImpactEntry], changed_files: list[ChangedFile]) -> CoverageAssessment:
+    """Estimate whether the PR appears to touch the structurally impacted area."""
+    changed_paths = {changed_file.path.resolve() for changed_file in changed_files}
+    changed_test_files = sum(1 for path in changed_paths if _is_test_path(path))
+
+    impacted_nodes: dict[str, Node] = {}
+    for entry in entries:
+        impacted_nodes[entry.node.id] = entry.node
+        for node in entry.affected_nodes:
+            impacted_nodes[node.id] = node
+
+    impacted_file_paths = {
+        Path(node.file_path).resolve()
+        for node in impacted_nodes.values()
+        if node.file_path is not None
+    }
+    touched_impacted_nodes = sum(
+        1
+        for node in impacted_nodes.values()
+        if node.file_path is not None and Path(node.file_path).resolve() in changed_paths
+    )
+    touched_impacted_files = len(impacted_file_paths & changed_paths)
+
+    if not impacted_nodes:
+        status = "unknown"
+    elif touched_impacted_files == 0:
+        status = "uncovered"
+    elif touched_impacted_files == len(impacted_file_paths) and changed_test_files > 0:
+        status = "well-covered"
+    else:
+        status = "partial"
+
+    return CoverageAssessment(
+        impacted_nodes=len(impacted_nodes),
+        touched_impacted_nodes=touched_impacted_nodes,
+        impacted_files=len(impacted_file_paths),
+        touched_impacted_files=touched_impacted_files,
+        changed_test_files=changed_test_files,
+        status=status,
+    )
+
+
+def format_console_report(
+    entries: list[ImpactEntry],
+    changed_files: list[ChangedFile],
+    thresholds: SeverityThresholds,
+) -> str:
     """Format a human-readable console report."""
+    total_blast_radius = sum(entry.blast_radius for entry in entries)
+    overall_severity = classify_severity(total_blast_radius, thresholds)
+    coverage = assess_pr_coverage(entries, changed_files)
     lines = [
         "ctxgraph impact report",
         "=====================",
         f"Changed Python files: {len(changed_files)}",
         f"Changed symbols: {len(entries)}",
+        f"Combined blast radius: {total_blast_radius} nodes ({overall_severity})",
+        f"PR coverage signal: {coverage.status}",
+        (
+            "Impacted area touched in PR: "
+            f"{coverage.touched_impacted_nodes}/{coverage.impacted_nodes} nodes, "
+            f"{coverage.touched_impacted_files}/{coverage.impacted_files} files"
+        ),
+        f"Changed test files: {coverage.changed_test_files}",
         "",
     ]
 
@@ -235,8 +329,9 @@ def format_console_report(entries: list[ImpactEntry], changed_files: list[Change
         return "\n".join(lines)
 
     for entry in entries:
+        severity = classify_severity(entry.blast_radius, thresholds)
         lines.append(f"- {entry.node.id} [{entry.node.type.name.lower()}]")
-        lines.append(f"  blast radius: {entry.blast_radius} nodes")
+        lines.append(f"  blast radius: {entry.blast_radius} nodes ({severity})")
         if entry.high_risk_callers:
             lines.append("  high-risk callers:")
             for caller in entry.high_risk_callers:
@@ -248,15 +343,22 @@ def format_console_report(entries: list[ImpactEntry], changed_files: list[Change
     return "\n".join(lines).rstrip()
 
 
-def format_markdown_report(entries: list[ImpactEntry], changed_files: list[ChangedFile]) -> str:
+def format_markdown_report(
+    entries: list[ImpactEntry],
+    changed_files: list[ChangedFile],
+    thresholds: SeverityThresholds,
+) -> str:
     """Format a PR-comment friendly markdown report."""
     total_blast_radius = sum(entry.blast_radius for entry in entries)
+    overall_severity = classify_severity(total_blast_radius, thresholds)
+    coverage = assess_pr_coverage(entries, changed_files)
     lines = [
         "## `ctxgraph` impact report",
         "",
         f"- Changed Python files: **{len(changed_files)}**",
         f"- Changed symbols: **{len(entries)}**",
         f"- Combined blast radius: **{total_blast_radius} nodes**",
+        f"- Overall severity: **{overall_severity}**",
         "",
     ]
 
@@ -267,9 +369,18 @@ def format_markdown_report(entries: list[ImpactEntry], changed_files: list[Chang
     lines.append("### Changed symbols")
     lines.append("")
     for entry in entries:
+        severity = classify_severity(entry.blast_radius, thresholds)
         lines.append(
-            f"- `{entry.node.id}` ({entry.node.type.name.lower()}, blast radius: {entry.blast_radius})"
+            f"- `{entry.node.id}` ({entry.node.type.name.lower()}, blast radius: {entry.blast_radius}, severity: {severity})"
         )
+
+    lines.append("")
+    lines.append("### PR coverage signals")
+    lines.append("")
+    lines.append(f"- Impacted nodes already touched in PR: **{coverage.touched_impacted_nodes}/{coverage.impacted_nodes}**")
+    lines.append(f"- Impacted files already touched in PR: **{coverage.touched_impacted_files}/{coverage.impacted_files}**")
+    lines.append(f"- Changed test files in PR: **{coverage.changed_test_files}**")
+    lines.append(f"- Structural coverage assessment: **{coverage.status}**")
 
     notable_callers = [
         caller.id
@@ -293,6 +404,14 @@ def write_step_summary(markdown: str) -> None:
     if not summary_path:
         return
     Path(summary_path).write_text(markdown + "\n", encoding="utf-8")
+
+
+def write_markdown_output(markdown: str, output_path: Path | None) -> None:
+    """Optionally write the markdown report to disk."""
+    if output_path is None:
+        return
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(markdown + "\n", encoding="utf-8")
 
 
 def maybe_post_pr_comment(markdown: str, repo: str, token: str, event_path: Path) -> None:
@@ -369,9 +488,28 @@ def main(argv: list[str] | None = None) -> int:
         default="pr",
         help="Whether to post a PR comment.",
     )
+    parser.add_argument(
+        "--markdown-out",
+        help="Optional path to write the generated markdown report.",
+    )
+    parser.add_argument(
+        "--low-max",
+        type=int,
+        default=10,
+        help="Maximum blast radius counted as low severity.",
+    )
+    parser.add_argument(
+        "--medium-max",
+        type=int,
+        default=25,
+        help="Maximum blast radius counted as medium severity.",
+    )
     args = parser.parse_args(argv)
 
     repo_root = Path(args.repo_path).resolve()
+    if args.low_max >= args.medium_max:
+        raise ValueError("--low-max must be less than --medium-max")
+    thresholds = SeverityThresholds(low_max=args.low_max, medium_max=args.medium_max)
 
     group("ctxgraph: detect changed files")
     changed_files = collect_changed_files(repo_root, args.base_ref, args.head_ref)
@@ -397,12 +535,13 @@ def main(argv: list[str] | None = None) -> int:
 
     group("ctxgraph: compute impact")
     entries = build_impact_entries(graph_nodes, query_engine, changed_files, args.depth, args.max_callers)
-    console_report = format_console_report(entries, changed_files)
+    console_report = format_console_report(entries, changed_files, thresholds)
     log(console_report)
     endgroup()
 
-    markdown = format_markdown_report(entries, changed_files)
+    markdown = format_markdown_report(entries, changed_files, thresholds)
     write_step_summary(markdown)
+    write_markdown_output(markdown, Path(args.markdown_out) if args.markdown_out else None)
 
     if args.comment_mode == "pr":
         token = os.environ.get("GITHUB_TOKEN")

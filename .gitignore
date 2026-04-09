@@ -65,3 +65,4 @@ Thumbs.db
 # demos/ — commit GIFs only, exclude everything else
 demos/*
 !demos/*.gif
+.ctxgraph/
