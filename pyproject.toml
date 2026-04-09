@@ -36,9 +36,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/ctxgraph"
-Repository = "https://github.com/yourusername/ctxgraph"
-Issues = "https://github.com/yourusername/ctxgraph/issues"
+Homepage = "https://github.com/Broodingspace/ctxgraph"
+Repository = "https://github.com/Broodingspace/ctxgraph"
+Issues = "https://github.com/Broodingspace/ctxgraph/issues"
 
 [project.scripts]
 ctxgraph = "ctxgraph.cli.main:main"
