@@ -26,6 +26,18 @@ inputs:
     description: "Whether to post a PR comment."
     required: false
     default: "pr"
+  markdown-out:
+    description: "Optional path to write the generated markdown report."
+    required: false
+    default: ""
+  low-max:
+    description: "Maximum blast radius counted as low severity."
+    required: false
+    default: "10"
+  medium-max:
+    description: "Maximum blast radius counted as medium severity."
+    required: false
+    default: "25"
 runs:
   using: "composite"
   steps:
@@ -41,6 +53,7 @@ runs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
         INPUT_PACKAGE_NAME: ${{ inputs.package-name }}
+        INPUT_MARKDOWN_OUT: ${{ inputs.markdown-out }}
       run: |
         cmd=(
           python "${{ github.action_path }}/scripts/github_action.py"
@@ -50,8 +63,13 @@ runs:
           --depth "${{ inputs.depth }}"
           --max-callers "${{ inputs.max-callers }}"
           --comment-mode "${{ inputs.comment-mode }}"
+          --low-max "${{ inputs.low-max }}"
+          --medium-max "${{ inputs.medium-max }}"
         )
         if [ -n "${INPUT_PACKAGE_NAME}" ]; then
           cmd+=(--package-name "${INPUT_PACKAGE_NAME}")
+        fi
+        if [ -n "${INPUT_MARKDOWN_OUT}" ]; then
+          cmd+=(--markdown-out "${INPUT_MARKDOWN_OUT}")
         fi
         "${cmd[@]}"

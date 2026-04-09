@@ -38,7 +38,7 @@ class User(BaseModel):
         Returns:
             Display name.
         """
-        return f"User: {self.name}"
+        return f"User<{self.id}>: {self.name}"
 
 
 class Product(BaseModel):
