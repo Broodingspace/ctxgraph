@@ -21,10 +21,13 @@ _SPEC.loader.exec_module(_MODULE)
 
 ChangedLineRange = _MODULE.ChangedLineRange
 ChangedFile = _MODULE.ChangedFile
+SeverityThresholds = _MODULE.SeverityThresholds
 build_impact_entries = _MODULE.build_impact_entries
+classify_severity = _MODULE.classify_severity
 format_markdown_report = _MODULE.format_markdown_report
 map_changed_files_to_nodes = _MODULE.map_changed_files_to_nodes
 parse_changed_files = _MODULE.parse_changed_files
+write_markdown_output = _MODULE.write_markdown_output
 
 
 def test_parse_changed_files_extracts_python_ranges(tmp_path: Path) -> None:
@@ -100,10 +103,29 @@ def test_build_impact_entries_and_markdown_report() -> None:
     ]
 
     entries = build_impact_entries(list(graph.nodes()), engine, changed, max_depth=2, max_callers=3)
-    report = format_markdown_report(entries, changed)
+    report = format_markdown_report(entries, changed, thresholds=SeverityThresholds())
 
     assert entries
     assert "ctxgraph" in report
     assert "Changed symbols" in report
     assert target.id in report
     assert len(entries[0].high_risk_callers) == len({caller.id for caller in entries[0].high_risk_callers})
+    assert "Overall severity" in report
+
+
+def test_classify_severity_uses_thresholds() -> None:
+    """Severity classification should respect configured thresholds."""
+    thresholds = SeverityThresholds(low_max=3, medium_max=8)
+
+    assert classify_severity(2, thresholds) == "low"
+    assert classify_severity(5, thresholds) == "medium"
+    assert classify_severity(12, thresholds) == "high"
+
+
+def test_write_markdown_output_creates_file(tmp_path: Path) -> None:
+    """Markdown reports should be writable for local preview."""
+    output_path = tmp_path / "impact" / "report.md"
+
+    write_markdown_output("hello", output_path)
+
+    assert output_path.read_text(encoding="utf-8") == "hello\n"

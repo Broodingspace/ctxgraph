@@ -200,6 +200,17 @@ jobs:
           comment-mode: pr
 ```
 
+Local preview example:
+
+```bash
+python scripts/github_action.py \
+  --repo-path . \
+  --base-ref HEAD~1 \
+  --head-ref HEAD \
+  --comment-mode none \
+  --markdown-out .ctxgraph/impact-report.md
+```
+
 Implementation files:
 
 - [action.yml](action.yml)
