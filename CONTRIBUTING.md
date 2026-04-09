@@ -7,7 +7,7 @@ Thanks for your interest in contributing. `ctxgraph` is a library-first project 
 ## Setup
 
 ```bash
-git clone https://github.com/yourusername/ctxgraph
+git clone https://github.com/Broodingspace/ctxgraph
 cd ctxgraph
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate

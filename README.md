@@ -36,7 +36,7 @@ Designed to be **library-first**, **local-first**, and **useful without any LLM*
 ```bash
 pip install ctxgraph
 # or from source:
-git clone https://github.com/yourusername/ctxgraph.git
+git clone https://github.com/Broodingspace/ctxgraph.git
 cd ctxgraph && pip install -e .
 ```
 
@@ -156,6 +156,55 @@ ctxgraph load graph.json
 ctxgraph inspect --graph-file graph.json myproject.models.User
 ctxgraph blast-radius --graph-file graph.json myproject.models.User --depth 3
 ```
+
+---
+
+## GitHub Action
+
+`ctxgraph` now includes a proof-of-concept GitHub Action for structural PR impact analysis.
+
+It is aimed at a gap most tooling does not cover cleanly for Python repositories:
+
+- detect changed Python files in a pull request
+- map changed lines to graph symbols
+- compute blast radius for each changed symbol
+- identify likely high-risk callers
+- post a PR comment with a structural impact summary
+
+Minimal workflow example:
+
+```yaml
+name: ctxgraph impact
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  impact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: Broodingspace/ctxgraph@main
+        with:
+          repo-path: .
+          base-ref: ${{ github.event.pull_request.base.sha }}
+          head-ref: ${{ github.event.pull_request.head.sha }}
+          comment-mode: pr
+```
+
+Implementation files:
+
+- [action.yml](action.yml)
+- [scripts/github_action.py](scripts/github_action.py)
+- [.github/workflows/ctxgraph-impact-demo.yml](.github/workflows/ctxgraph-impact-demo.yml)
 
 ---
 
@@ -331,7 +380,7 @@ graph = load_graph("graph.json")
 ## Development
 
 ```bash
-git clone https://github.com/yourusername/ctxgraph
+git clone https://github.com/Broodingspace/ctxgraph
 cd ctxgraph
 pip install -e ".[dev]"
 

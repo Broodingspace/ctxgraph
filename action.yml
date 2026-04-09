@@ -1,0 +1,57 @@
+name: "ctxgraph impact report"
+description: "Build a structural impact report for Python pull requests using ctxgraph."
+inputs:
+  repo-path:
+    description: "Repository path to analyze."
+    required: false
+    default: "."
+  package-name:
+    description: "Optional top-level package name."
+    required: false
+  base-ref:
+    description: "Base git ref or SHA for the diff."
+    required: true
+  head-ref:
+    description: "Head git ref or SHA for the diff."
+    required: true
+  depth:
+    description: "Blast radius depth."
+    required: false
+    default: "2"
+  max-callers:
+    description: "Maximum high-risk callers per changed symbol."
+    required: false
+    default: "5"
+  comment-mode:
+    description: "Whether to post a PR comment."
+    required: false
+    default: "pr"
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    - name: Install ctxgraph
+      shell: bash
+      run: pip install "${{ github.action_path }}"
+    - name: Run ctxgraph impact analysis
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        INPUT_PACKAGE_NAME: ${{ inputs.package-name }}
+      run: |
+        cmd=(
+          python "${{ github.action_path }}/scripts/github_action.py"
+          --repo-path "${{ inputs.repo-path }}"
+          --base-ref "${{ inputs.base-ref }}"
+          --head-ref "${{ inputs.head-ref }}"
+          --depth "${{ inputs.depth }}"
+          --max-callers "${{ inputs.max-callers }}"
+          --comment-mode "${{ inputs.comment-mode }}"
+        )
+        if [ -n "${INPUT_PACKAGE_NAME}" ]; then
+          cmd+=(--package-name "${INPUT_PACKAGE_NAME}")
+        fi
+        "${cmd[@]}"
