@@ -21,7 +21,9 @@ _SPEC.loader.exec_module(_MODULE)
 
 ChangedLineRange = _MODULE.ChangedLineRange
 ChangedFile = _MODULE.ChangedFile
+CoverageAssessment = _MODULE.CoverageAssessment
 SeverityThresholds = _MODULE.SeverityThresholds
+assess_pr_coverage = _MODULE.assess_pr_coverage
 build_impact_entries = _MODULE.build_impact_entries
 classify_severity = _MODULE.classify_severity
 format_markdown_report = _MODULE.format_markdown_report
@@ -111,6 +113,34 @@ def test_build_impact_entries_and_markdown_report() -> None:
     assert target.id in report
     assert len(entries[0].high_risk_callers) == len({caller.id for caller in entries[0].high_risk_callers})
     assert "Overall severity" in report
+    assert "PR coverage signals" in report
+
+
+def test_assess_pr_coverage_reports_touched_area() -> None:
+    """Coverage assessment should reflect impacted files touched in the PR."""
+    graph = build_graph(SAMPLE_PROJECT, package_name="sample_project")
+    engine = QueryEngine(graph)
+    target = next(node for node in graph.nodes() if node.name == "BaseModel")
+    assert target.location is not None
+
+    changed = [
+        ChangedFile(
+            path=Path(target.location.file_path).resolve(),
+            ranges=(ChangedLineRange(target.location.line_start, target.location.line_end),),
+        ),
+        ChangedFile(
+            path=(Path(target.location.file_path).resolve().parent / "test_models.py"),
+            ranges=(ChangedLineRange(1, 10),),
+        ),
+    ]
+
+    entries = build_impact_entries(list(graph.nodes()), engine, changed[:1], max_depth=2, max_callers=3)
+    coverage = assess_pr_coverage(entries, changed)
+
+    assert isinstance(coverage, CoverageAssessment)
+    assert coverage.touched_impacted_files >= 1
+    assert coverage.changed_test_files == 1
+    assert coverage.status in {"partial", "well-covered"}
 
 
 def test_classify_severity_uses_thresholds() -> None:

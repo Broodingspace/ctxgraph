@@ -59,6 +59,7 @@ class ImpactEntry:
     node: Node
     blast_radius: int
     high_risk_callers: tuple[Node, ...]
+    affected_nodes: tuple[Node, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +68,18 @@ class SeverityThresholds:
 
     low_max: int = 10
     medium_max: int = 25
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageAssessment:
+    """Structural coverage signals for the current PR."""
+
+    impacted_nodes: int
+    touched_impacted_nodes: int
+    impacted_files: int
+    touched_impacted_files: int
+    changed_test_files: int
+    status: str
 
 
 def run_git(args: list[str], cwd: Path) -> str:
@@ -222,6 +235,7 @@ def build_impact_entries(
                 node=node,
                 blast_radius=blast.count,
                 high_risk_callers=callers,
+                affected_nodes=tuple(sorted(blast.affected_nodes, key=lambda item: item.id)),
             )
         )
 
@@ -237,6 +251,54 @@ def classify_severity(blast_radius: int, thresholds: SeverityThresholds) -> str:
     return "high"
 
 
+def _is_test_path(path: Path) -> bool:
+    """Return whether a path looks like a Python test file."""
+    name = path.name
+    return name.startswith("test_") or name.endswith("_test.py") or name == "conftest.py"
+
+
+def assess_pr_coverage(entries: list[ImpactEntry], changed_files: list[ChangedFile]) -> CoverageAssessment:
+    """Estimate whether the PR appears to touch the structurally impacted area."""
+    changed_paths = {changed_file.path.resolve() for changed_file in changed_files}
+    changed_test_files = sum(1 for path in changed_paths if _is_test_path(path))
+
+    impacted_nodes: dict[str, Node] = {}
+    for entry in entries:
+        impacted_nodes[entry.node.id] = entry.node
+        for node in entry.affected_nodes:
+            impacted_nodes[node.id] = node
+
+    impacted_file_paths = {
+        Path(node.file_path).resolve()
+        for node in impacted_nodes.values()
+        if node.file_path is not None
+    }
+    touched_impacted_nodes = sum(
+        1
+        for node in impacted_nodes.values()
+        if node.file_path is not None and Path(node.file_path).resolve() in changed_paths
+    )
+    touched_impacted_files = len(impacted_file_paths & changed_paths)
+
+    if not impacted_nodes:
+        status = "unknown"
+    elif touched_impacted_files == 0:
+        status = "uncovered"
+    elif touched_impacted_files == len(impacted_file_paths) and changed_test_files > 0:
+        status = "well-covered"
+    else:
+        status = "partial"
+
+    return CoverageAssessment(
+        impacted_nodes=len(impacted_nodes),
+        touched_impacted_nodes=touched_impacted_nodes,
+        impacted_files=len(impacted_file_paths),
+        touched_impacted_files=touched_impacted_files,
+        changed_test_files=changed_test_files,
+        status=status,
+    )
+
+
 def format_console_report(
     entries: list[ImpactEntry],
     changed_files: list[ChangedFile],
@@ -245,12 +307,20 @@ def format_console_report(
     """Format a human-readable console report."""
     total_blast_radius = sum(entry.blast_radius for entry in entries)
     overall_severity = classify_severity(total_blast_radius, thresholds)
+    coverage = assess_pr_coverage(entries, changed_files)
     lines = [
         "ctxgraph impact report",
         "=====================",
         f"Changed Python files: {len(changed_files)}",
         f"Changed symbols: {len(entries)}",
         f"Combined blast radius: {total_blast_radius} nodes ({overall_severity})",
+        f"PR coverage signal: {coverage.status}",
+        (
+            "Impacted area touched in PR: "
+            f"{coverage.touched_impacted_nodes}/{coverage.impacted_nodes} nodes, "
+            f"{coverage.touched_impacted_files}/{coverage.impacted_files} files"
+        ),
+        f"Changed test files: {coverage.changed_test_files}",
         "",
     ]
 
@@ -281,6 +351,7 @@ def format_markdown_report(
     """Format a PR-comment friendly markdown report."""
     total_blast_radius = sum(entry.blast_radius for entry in entries)
     overall_severity = classify_severity(total_blast_radius, thresholds)
+    coverage = assess_pr_coverage(entries, changed_files)
     lines = [
         "## `ctxgraph` impact report",
         "",
@@ -302,6 +373,14 @@ def format_markdown_report(
         lines.append(
             f"- `{entry.node.id}` ({entry.node.type.name.lower()}, blast radius: {entry.blast_radius}, severity: {severity})"
         )
+
+    lines.append("")
+    lines.append("### PR coverage signals")
+    lines.append("")
+    lines.append(f"- Impacted nodes already touched in PR: **{coverage.touched_impacted_nodes}/{coverage.impacted_nodes}**")
+    lines.append(f"- Impacted files already touched in PR: **{coverage.touched_impacted_files}/{coverage.impacted_files}**")
+    lines.append(f"- Changed test files in PR: **{coverage.changed_test_files}**")
+    lines.append(f"- Structural coverage assessment: **{coverage.status}**")
 
     notable_callers = [
         caller.id
