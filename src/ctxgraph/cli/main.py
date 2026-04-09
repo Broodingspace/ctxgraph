@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from ..exporters import export_graph_json, graph_to_dict
-from ..graph import CodeGraph, NodeType
+from ..graph import CodeGraph, EdgeType, NodeType
 from ..io import load_graph
 from ..parser import build_graph
 from ..query import QueryEngine
@@ -56,6 +56,12 @@ def build_parser() -> ArgumentParser:
         "--json",
         action="store_true",
         help="Print machine-readable JSON instead of text output.",
+    )
+    load_cmd.add_argument(
+        "--view",
+        choices=("plain", "chart"),
+        default="plain",
+        help="Summary view for human-readable output (default: plain).",
     )
     load_cmd.set_defaults(handler=_handle_load)
 
@@ -222,6 +228,12 @@ def _add_repo_build_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Print machine-readable JSON instead of text output.",
     )
+    parser.add_argument(
+        "--view",
+        choices=("plain", "chart"),
+        default="plain",
+        help="Summary view for human-readable output (default: plain).",
+    )
 
 
 def _add_repo_query_args(parser: argparse.ArgumentParser) -> None:
@@ -336,11 +348,22 @@ def _handle_build(args: argparse.Namespace) -> int:
         print(json.dumps(graph_to_dict(graph, source_path=str(repo_path))["summary"], indent=2))
         return 0
 
+    stats = graph.stats()
+    if args.view == "chart":
+        _print_graph_overview_chart(
+            title="ctxgraph graph overview",
+            source_label="repo",
+            source_value=str(repo_path),
+            total_nodes=graph.node_count,
+            total_edges=graph.edge_count,
+            nodes_by_type=stats["nodes_by_type"],
+            edges_by_type=stats["edges_by_type"],
+        )
+        return 0
+
     print(f"Repository: {repo_path}")
     print(f"Nodes: {graph.node_count}")
     print(f"Edges: {graph.edge_count}")
-
-    stats = graph.stats()
     print("Node types:")
     for node_type, count in sorted(stats["nodes_by_type"].items(), key=lambda item: item[0].name):
         print(f"  {node_type.name.lower()}: {count}")
@@ -358,6 +381,18 @@ def _handle_load(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
+    if args.view == "chart":
+        _print_graph_overview_chart(
+            title="ctxgraph graph overview",
+            source_label="graph",
+            source_value=str(graph_path),
+            total_nodes=payload["total_nodes"],
+            total_edges=payload["total_edges"],
+            nodes_by_type={NodeType[key.upper()]: value for key, value in payload["nodes_by_type"].items()},
+            edges_by_type={EdgeType[key.upper()]: value for key, value in payload["edges_by_type"].items()},
+        )
+        return 0
+
     print(f"Graph file: {graph_path}")
     print(f"Nodes: {payload['total_nodes']}")
     print(f"Edges: {payload['total_edges']}")
@@ -368,6 +403,70 @@ def _handle_load(args: argparse.Namespace) -> int:
     for edge_type, count in sorted(payload["edges_by_type"].items()):
         print(f"  {edge_type}: {count}")
     return 0
+
+
+def _print_graph_overview_chart(
+    title: str,
+    source_label: str,
+    source_value: str,
+    total_nodes: int,
+    total_edges: int,
+    nodes_by_type: dict[NodeType, int],
+    edges_by_type: dict[EdgeType, int],
+) -> None:
+    """Print a chart-style graph overview."""
+    print(title)
+    print(f"{source_label}: {source_value}")
+    print()
+    print(f"{total_nodes} nodes / {total_edges} edges")
+    print()
+    print("Nodes")
+    _print_distribution_chart(
+        [
+            (node_type.name.lower(), count)
+            for node_type, count in sorted(nodes_by_type.items(), key=lambda item: item[0].name)
+        ]
+    )
+    print()
+    print("Edges")
+    _print_distribution_chart(
+        [
+            (edge_type.name.lower(), count)
+            for edge_type, count in sorted(edges_by_type.items(), key=lambda item: item[0].name)
+        ]
+    )
+
+
+def _print_distribution_chart(items: list[tuple[str, int]], width: int = 22) -> None:
+    """Print a labeled horizontal bar chart."""
+    total = sum(count for _, count in items)
+    max_count = max((count for _, count in items), default=0)
+    fill_char = _chart_fill_char()
+
+    for label, count in items:
+        percent = int(round((count / total) * 100)) if total else 0
+        bar = _make_bar(count, max_count, width, fill_char)
+        print(f"{label:<10} {count:>4}  {percent:>3}%  {bar}")
+
+
+def _make_bar(count: int, max_count: int, width: int, fill_char: str) -> str:
+    """Render a scaled bar."""
+    if max_count <= 0 or count <= 0:
+        return ""
+    filled = max(1, round((count / max_count) * width))
+    return fill_char * filled
+
+
+def _chart_fill_char() -> str:
+    """Choose a chart fill character based on stdout encoding support."""
+    encoding = (sys.stdout.encoding or "").lower()
+    try:
+        "█".encode(encoding or "utf-8")
+    except LookupError:
+        return "#"
+    except UnicodeEncodeError:
+        return "#"
+    return "█"
 
 
 def _handle_inspect(args: argparse.Namespace) -> int:

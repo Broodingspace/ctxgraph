@@ -45,6 +45,19 @@ def test_build_command_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload["total_edges"] > 0
 
 
+def test_build_command_chart_view(capsys: pytest.CaptureFixture[str]) -> None:
+    """The build command should support a chart-style summary view."""
+    exit_code = main(["build", str(SAMPLE_PROJECT), "--view", "chart"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "ctxgraph graph overview" in captured.out
+    assert "repo:" in captured.out
+    assert "Nodes" in captured.out
+    assert "Edges" in captured.out
+    assert "█" in captured.out
+
+
 def test_inspect_command_prints_metadata(capsys: pytest.CaptureFixture[str]) -> None:
     """The inspect command should print node details."""
     symbol_id = _find_symbol_id("User")
@@ -124,6 +137,20 @@ def test_load_command_reads_serialized_graph(
     assert exit_code == 0
     assert "Graph file:" in captured.out
     assert "Nodes:" in captured.out
+
+
+def test_load_command_chart_view(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The load command should support a chart-style summary view."""
+    graph = build_graph(SAMPLE_PROJECT, package_name="sample_project")
+    graph_path = save_graph(graph, tmp_path / "graph.json", source_path=str(SAMPLE_PROJECT))
+
+    exit_code = main(["load", str(graph_path), "--view", "chart"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "ctxgraph graph overview" in captured.out
+    assert "graph:" in captured.out
+    assert "█" in captured.out
 
 
 def test_inspect_command_supports_graph_file(

@@ -198,6 +198,8 @@ jobs:
           base-ref: ${{ github.event.pull_request.base.sha }}
           head-ref: ${{ github.event.pull_request.head.sha }}
           comment-mode: pr
+          run-tests: "true"
+          test-command: "pytest"
 ```
 
 Local preview example:
@@ -210,6 +212,12 @@ python scripts/github_action.py \
   --comment-mode none \
   --markdown-out .ctxgraph/impact-report.md
 ```
+
+Action test inputs:
+
+- `run-tests`: run the repository test suite before impact reporting
+- `test-command`: test command to execute, for example `pytest` or `python -m pytest`
+- `fail-on-test-failure`: fail the action if tests fail
 
 Implementation files:
 

@@ -24,3 +24,5 @@ jobs:
           base-ref: ${{ github.event.pull_request.base.sha }}
           head-ref: ${{ github.event.pull_request.head.sha }}
           comment-mode: pr
+          run-tests: "true"
+          test-command: "pytest"
