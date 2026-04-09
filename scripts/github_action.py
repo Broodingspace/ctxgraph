@@ -136,18 +136,9 @@ def map_changed_files_to_nodes(graph_nodes: list[Node], changed_files: list[Chan
 
     for changed_file in changed_files:
         candidates = by_path.get(changed_file.path, [])
-        overlapping = [
-            node
-            for node in candidates
-            if node.location is not None
-            and any(
-                changed_range.overlaps(node.location.line_start, node.location.line_end)
-                for changed_range in changed_file.ranges
-            )
-        ]
-
-        if overlapping:
-            for node in overlapping:
+        specific_nodes = _select_specific_overlapping_nodes(candidates, changed_file.ranges)
+        if specific_nodes:
+            for node in specific_nodes:
                 selected[node.id] = node
             continue
 
@@ -157,6 +148,48 @@ def map_changed_files_to_nodes(graph_nodes: list[Node], changed_files: list[Chan
                 selected[node.id] = node
 
     return sorted(selected.values(), key=lambda node: node.id)
+
+
+def _select_specific_overlapping_nodes(
+    candidates: list[Node],
+    changed_ranges: tuple[ChangedLineRange, ...],
+) -> list[Node]:
+    """Select the most specific overlapping nodes for the changed ranges."""
+    selected: dict[str, Node] = {}
+
+    for changed_range in changed_ranges:
+        overlapping = [
+            node
+            for node in candidates
+            if node.location is not None
+            and changed_range.overlaps(node.location.line_start, node.location.line_end)
+        ]
+        if not overlapping:
+            continue
+
+        best_rank = min(_node_specificity_rank(node) for node in overlapping)
+        for node in overlapping:
+            if _node_specificity_rank(node) == best_rank:
+                selected[node.id] = node
+
+    return sorted(selected.values(), key=lambda node: node.id)
+
+
+def _node_specificity_rank(node: Node) -> tuple[int, int, int]:
+    """Rank nodes by how specifically they describe a changed span."""
+    if node.location is None:
+        span = 10**9
+    else:
+        span = node.location.line_end - node.location.line_start
+
+    type_rank = {
+        NodeType.FUNCTION: 0,
+        NodeType.CLASS: 1,
+        NodeType.MODULE: 2,
+    }.get(node.type, 3)
+
+    depth = node.id.count(".")
+    return (type_rank, span, -depth)
 
 
 def build_impact_entries(
@@ -173,7 +206,9 @@ def build_impact_entries(
     for node in changed_nodes:
         blast = query_engine.find_blast_radius(node.id, max_depth=max_depth, direction="both")
         reverse = query_engine.get_reverse_dependencies(node.id, transitive=True)
-        callers = tuple(sorted(reverse.dependencies, key=lambda item: item.id)[:max_callers])
+        unique_callers = list(dict.fromkeys(caller.id for caller in reverse.dependencies))
+        caller_map = {caller.id: caller for caller in reverse.dependencies}
+        callers = tuple(caller_map[caller_id] for caller_id in sorted(unique_callers)[:max_callers])
         entries.append(
             ImpactEntry(
                 node=node,
